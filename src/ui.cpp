@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "pomodoro.h"
 #include "settings.h"
+#include "presets.h"
 #include <lvgl.h>
 #include <WiFi.h>
 #include <time.h>
@@ -19,10 +20,11 @@
 // ------------------------------------------------------------------
 // Objets
 // ------------------------------------------------------------------
-static lv_obj_t *scrMain, *scrSettings;
+static lv_obj_t *scrMain, *scrSettings, *scrPresets;
 static lv_obj_t *arc, *lblTime, *lblPhase, *lblClock, *lblWifi;
 static lv_obj_t *btnStart, *lblStart;
 static lv_obj_t *dots[8];
+static lv_obj_t *presetChip, *presetChipIcon, *presetChipLabel;
 
 // Écran réglages
 struct SettingRow {
@@ -52,12 +54,14 @@ static const char *phaseName(PomoPhase p) {
 }
 
 // ------------------------------------------------------------------
-// Callbacks
+// Callbacks écran principal / réglages
 // ------------------------------------------------------------------
 static void onStartPause(lv_event_t *) { g_pomodoro.startPause(); ui_update(); }
 static void onReset(lv_event_t *)      { g_pomodoro.reset(); ui_update(); }
 static void onSkip(lv_event_t *)       { g_pomodoro.skip(); ui_update(); }
 static void onOpenSettings(lv_event_t *) { lv_screen_load(scrSettings); }
+static void onOpenPresets(lv_event_t *)  { lv_screen_load(scrPresets); }
+static void onBackToMain(lv_event_t *)   { lv_screen_load(scrMain); }
 
 static void onCloseSettings(lv_event_t *) {
   g_settings.sessionsUntilLong = (uint8_t)sessionsTmp;
@@ -75,6 +79,13 @@ static void adjustRow(SettingRow *row, int dir) {
 }
 static void onRowMinus(lv_event_t *e) { adjustRow((SettingRow *)lv_event_get_user_data(e), -1); }
 static void onRowPlus(lv_event_t *e)  { adjustRow((SettingRow *)lv_event_get_user_data(e), +1); }
+
+static void onPickPreset(lv_event_t *e) {
+  uint8_t idx = (uint8_t)(intptr_t)lv_event_get_user_data(e);
+  preset_apply(idx);
+  lv_screen_load(scrMain);
+  ui_update(); // rafraîchit aussi le chip (voir ui_update)
+}
 
 // ------------------------------------------------------------------
 // Construction : écran principal
@@ -114,7 +125,7 @@ static void buildMain() {
   // --- Arc de progression ---
   arc = lv_arc_create(scrMain);
   lv_obj_set_size(arc, 176, 176);
-  lv_obj_align(arc, LV_ALIGN_LEFT_MID, 12, 10);
+  lv_obj_align(arc, LV_ALIGN_LEFT_MID, 12, 6);
   lv_arc_set_rotation(arc, 270);
   lv_arc_set_bg_angles(arc, 0, 360);
   lv_arc_set_range(arc, 0, 1000);
@@ -149,19 +160,45 @@ static void buildMain() {
     lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
   }
 
+  // --- Chip "type de session" sous l'arc (tap -> écran de sélection) ---
+  presetChip = lv_button_create(scrMain);
+  lv_obj_set_size(presetChip, 188, 34);
+  lv_obj_align(presetChip, LV_ALIGN_BOTTOM_LEFT, 12, -6);
+  lv_obj_set_style_bg_color(presetChip, COL_CARD, 0);
+  lv_obj_set_style_radius(presetChip, 10, 0);
+  lv_obj_set_style_shadow_width(presetChip, 0, 0);
+  lv_obj_add_event_cb(presetChip, onOpenPresets, LV_EVENT_CLICKED, nullptr);
+
+  presetChipIcon = lv_obj_create(presetChip);
+  lv_obj_remove_flag(presetChipIcon, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_border_width(presetChipIcon, 0, 0);
+  lv_obj_set_style_bg_opa(presetChipIcon, LV_OPA_TRANSP, 0);
+  lv_obj_set_size(presetChipIcon, 24, 24);
+  lv_obj_align(presetChipIcon, LV_ALIGN_LEFT_MID, 4, 0);
+
+  presetChipLabel = lv_label_create(presetChip);
+  lv_obj_set_style_text_color(presetChipLabel, COL_TEXT, 0);
+  lv_obj_set_style_text_font(presetChipLabel, &lv_font_montserrat_14, 0);
+  lv_obj_align(presetChipLabel, LV_ALIGN_LEFT_MID, 36, 0);
+
+  lv_obj_t *chevron = lv_label_create(presetChip);
+  lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
+  lv_obj_set_style_text_color(chevron, COL_MUTED, 0);
+  lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -8, 0);
+
   // --- Boutons colonne droite ---
   btnStart = makeButton(scrMain, LV_SYMBOL_PLAY "  Demarrer", COL_FOCUS, onStartPause, 112, 44);
-  lv_obj_align(btnStart, LV_ALIGN_TOP_RIGHT, -10, 66);
+  lv_obj_align(btnStart, LV_ALIGN_TOP_RIGHT, -10, 62);
   lblStart = lv_obj_get_child(btnStart, 0);
 
-  lv_obj_t *b = makeButton(scrMain, LV_SYMBOL_REFRESH "  Reset", COL_CARD, onReset, 112, 36);
-  lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -10, 118);
+  lv_obj_t *bReset = makeButton(scrMain, LV_SYMBOL_REFRESH, COL_CARD, onReset, 54, 34);
+  lv_obj_align(bReset, LV_ALIGN_TOP_RIGHT, -68, 112);
 
-  b = makeButton(scrMain, LV_SYMBOL_NEXT "  Passer", COL_CARD, onSkip, 112, 36);
-  lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -10, 160);
+  lv_obj_t *bSkip = makeButton(scrMain, LV_SYMBOL_NEXT, COL_CARD, onSkip, 54, 34);
+  lv_obj_align(bSkip, LV_ALIGN_TOP_RIGHT, -10, 112);
 
-  b = makeButton(scrMain, LV_SYMBOL_SETTINGS "  Regler", COL_CARD, onOpenSettings, 112, 36);
-  lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -10, 202);
+  lv_obj_t *bRegler = makeButton(scrMain, LV_SYMBOL_SETTINGS "  Regler", COL_CARD, onOpenSettings, 112, 34);
+  lv_obj_align(bRegler, LV_ALIGN_TOP_RIGHT, -10, 152);
 }
 
 // ------------------------------------------------------------------
@@ -174,7 +211,6 @@ static void buildRow(lv_obj_t *parent, int y, const char *name, SettingRow *row)
   lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
   lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 12, y + 12);
 
-  // Bouton "-"
   lv_obj_t *minus = lv_button_create(parent);
   lv_obj_set_size(minus, 40, 40);
   lv_obj_set_style_bg_color(minus, COL_CARD, 0);
@@ -185,14 +221,12 @@ static void buildRow(lv_obj_t *parent, int y, const char *name, SettingRow *row)
   lv_label_set_text(lm, LV_SYMBOL_MINUS);
   lv_obj_center(lm);
 
-  // Valeur
   row->lblValue = lv_label_create(parent);
   lv_obj_set_style_text_font(row->lblValue, &lv_font_montserrat_20, 0);
   lv_obj_set_style_text_color(row->lblValue, COL_LONG, 0);
   lv_label_set_text_fmt(row->lblValue, "%d", (int)*(row->value));
   lv_obj_align(row->lblValue, LV_ALIGN_TOP_RIGHT, -72, y + 10);
 
-  // Bouton "+"
   lv_obj_t *plus = lv_button_create(parent);
   lv_obj_set_size(plus, 40, 40);
   lv_obj_set_style_bg_color(plus, COL_CARD, 0);
@@ -231,12 +265,86 @@ static void buildSettings() {
 }
 
 // ------------------------------------------------------------------
+// Construction : écran de sélection du type de session (presets)
+// ------------------------------------------------------------------
+static void buildPresets() {
+  scrPresets = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(scrPresets, COL_BG, 0);
+
+  lv_obj_t *title = lv_label_create(scrPresets);
+  lv_label_set_text(title, "Type de session");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_color(title, COL_LONG, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 8);
+
+  lv_obj_t *closeBtn = lv_button_create(scrPresets);
+  lv_obj_set_size(closeBtn, 32, 32);
+  lv_obj_set_style_bg_color(closeBtn, COL_CARD, 0);
+  lv_obj_set_style_radius(closeBtn, 8, 0);
+  lv_obj_set_style_shadow_width(closeBtn, 0, 0);
+  lv_obj_align(closeBtn, LV_ALIGN_TOP_RIGHT, -8, 4);
+  lv_obj_add_event_cb(closeBtn, onBackToMain, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lc = lv_label_create(closeBtn);
+  lv_label_set_text(lc, LV_SYMBOL_CLOSE);
+  lv_obj_set_style_text_color(lc, COL_TEXT, 0);
+  lv_obj_center(lc);
+
+  const int cols = 3;
+  const int cardW = 92, cardH = 78, gapX = 6, gapY = 8;
+  const int startX = (320 - (cardW * cols + gapX * (cols - 1))) / 2;
+  const int startY = 36;
+
+  for (uint8_t i = 0; i < PRESET_COUNT; i++) {
+    int col = i % cols, row = i / cols;
+    int x = startX + col * (cardW + gapX);
+    int y = startY + row * (cardH + gapY);
+
+    lv_obj_t *card = lv_button_create(scrPresets);
+    lv_obj_set_size(card, cardW, cardH);
+    lv_obj_set_pos(card, x, y);
+    lv_obj_set_style_bg_color(card, COL_CARD, 0);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_add_event_cb(card, onPickPreset, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    lv_obj_t *iconBox = lv_obj_create(card);
+    lv_obj_remove_flag(iconBox, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_width(iconBox, 0, 0);
+    lv_obj_set_style_bg_opa(iconBox, LV_OPA_TRANSP, 0);
+    lv_obj_set_size(iconBox, 34, 34);
+    lv_obj_align(iconBox, LV_ALIGN_TOP_MID, 0, 6);
+    preset_draw_icon(iconBox, PRESETS[i].icon, PRESETS[i].color, 28);
+
+    lv_obj_t *lbl = lv_label_create(card);
+    lv_label_set_text(lbl, PRESETS[i].name);
+    lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -18);
+
+    lv_obj_t *dur = lv_label_create(card);
+    lv_label_set_text_fmt(dur, "%d min", (int)PRESETS[i].workMin);
+    lv_obj_set_style_text_color(dur, COL_MUTED, 0);
+    lv_obj_set_style_text_font(dur, &lv_font_montserrat_12, 0);
+    lv_obj_align(dur, LV_ALIGN_BOTTOM_MID, 0, -4);
+  }
+}
+
+// ------------------------------------------------------------------
 // API publique
 // ------------------------------------------------------------------
+static void refreshPresetChip() {
+  uint8_t idx = g_settings.activePreset < PRESET_COUNT ? g_settings.activePreset : 0;
+  lv_obj_clean(presetChipIcon);
+  preset_draw_icon(presetChipIcon, PRESETS[idx].icon, PRESETS[idx].color, 22);
+  lv_label_set_text(presetChipLabel, PRESETS[idx].name);
+}
+
 void ui_init() {
   buildMain();
   buildSettings();
+  buildPresets();
   lv_screen_load(scrMain);
+  refreshPresetChip();
   ui_update();
 }
 
@@ -275,18 +383,22 @@ void ui_update() {
 
   // Points de session
   uint8_t n = g_settings.sessionsUntilLong;
-  int spacing = 18;
-  int x0 = -10 - 112 + (112 - (n - 1) * spacing) / 2 - 5;
+  int spacing = 16;
+  int totalW = (n - 1) * spacing;
+  int x0 = -10 - 112 + (112 - totalW) / 2;
   for (int i = 0; i < 8; i++) {
     if (i < n) {
       lv_obj_remove_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
-      lv_obj_align(dots[i], LV_ALIGN_TOP_RIGHT, x0 + i * spacing, 40);
+      lv_obj_align(dots[i], LV_ALIGN_TOP_RIGHT, x0 + i * spacing, 44);
       lv_obj_set_style_bg_color(dots[i],
         (i < g_pomodoro.completedInCycle()) ? COL_FOCUS : COL_CARD, 0);
     } else {
       lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
     }
   }
+
+  // Chip du type de session actif
+  refreshPresetChip();
 
   // Horloge (NTP)
   time_t now = time(nullptr);
