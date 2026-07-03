@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Pomodoro CYD — un minuteur Pomodoro tactile pour écran ESP32 CYD 2.8 pouces, flashable directement depuis le navigateur, avec configuration Wi-Fi et portail web.">
+<title>Pomodoro CYD — Minuteur tactile flashable depuis le navigateur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&family=Public+Sans:wght@400;500&display=swap" rel="stylesheet">
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+:root{
+  --ink:#141210;
+  --panel:#1f1b15;
+  --panel-2:#282218;
+  --line:#352d20;
+  --pcb:#f2c14e;
+  --pcb-dark:#c99a2e;
+  --tomato:#e8503a;
+  --teal:#3fbfa8;
+  --cream:#f5efdf;
+  --muted:#a89f8d;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+body{
+  background:var(--ink);color:var(--cream);
+  font-family:"Public Sans",system-ui,sans-serif;
+  line-height:1.6;font-size:16px;
+}
+.mono{font-family:"JetBrains Mono",monospace}
+h1,h2,h3{font-family:"Bricolage Grotesque","Public Sans",sans-serif;line-height:1.15}
+a{color:var(--pcb)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+
+/* ---------- Nav ---------- */
+nav{
+  position:sticky;top:0;z-index:50;
+  background:rgba(20,18,16,.9);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+}
+nav .wrap{display:flex;align-items:center;gap:24px;height:60px}
+.logo{display:flex;align-items:center;gap:10px;font-family:"Bricolage Grotesque";font-weight:800;font-size:1.1rem;color:var(--cream);text-decoration:none}
+.logo .chip{width:26px;height:26px;border-radius:6px;background:var(--pcb);position:relative;display:inline-block}
+.logo .chip::after{content:"";position:absolute;inset:6px;border-radius:3px;background:var(--ink)}
+nav ul{display:flex;gap:20px;list-style:none;margin-left:auto}
+nav ul a{color:var(--muted);text-decoration:none;font-size:.9rem}
+nav ul a:hover,nav ul a:focus-visible{color:var(--pcb)}
+:focus-visible{outline:2px solid var(--pcb);outline-offset:3px;border-radius:4px}
+
+/* ---------- Hero ---------- */
+.hero{padding:72px 0 56px;display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
+.eyebrow{font-family:"JetBrains Mono";font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin-bottom:16px}
+.hero h1{font-size:clamp(2.2rem,5vw,3.4rem);font-weight:800;margin-bottom:20px}
+.hero h1 em{font-style:normal;color:var(--tomato)}
+.hero p.lead{color:var(--muted);font-size:1.05rem;max-width:46ch;margin-bottom:28px}
+.cta-row{display:flex;gap:14px;flex-wrap:wrap}
+.btn{
+  display:inline-block;padding:14px 24px;border-radius:10px;
+  font-weight:600;text-decoration:none;font-size:1rem;border:0;cursor:pointer;
+  transition:transform .12s ease, filter .12s ease;
+}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+.btn-primary{background:var(--tomato);color:#fff}
+.btn-ghost{background:transparent;color:var(--cream);border:1px solid var(--line)}
+
+/* ---------- Le CYD illustré (signature) ---------- */
+.device{
+  --pcbw:340px;
+  width:var(--pcbw);margin:0 auto;
+  background:linear-gradient(160deg,var(--pcb),var(--pcb-dark));
+  border-radius:16px;padding:22px 22px 30px;position:relative;
+  box-shadow:0 24px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.35);
+  transform:rotate(-2deg);
+}
+.device .hole{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--ink);box-shadow:inset 0 1px 2px rgba(0,0,0,.8),0 0 0 3px rgba(255,255,255,.18)}
+.device .hole.tl{top:8px;left:8px}.device .hole.tr{top:8px;right:8px}
+.device .hole.bl{bottom:8px;left:8px}.device .hole.br{bottom:8px;right:8px}
+.device .silk{font-family:"JetBrains Mono";font-size:.62rem;color:rgba(20,18,16,.75);display:flex;justify-content:space-between;margin-top:10px}
+.screen{
+  background:var(--ink);border-radius:8px;aspect-ratio:4/3;
+  padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  box-shadow:inset 0 0 0 3px #0a0908, inset 0 0 24px rgba(0,0,0,.9);
+  position:relative;
+}
+.screen .ring{width:140px;height:140px}
+.screen .ring circle{fill:none;stroke-width:8;stroke-linecap:round}
+.screen .ring .track{stroke:var(--panel-2)}
+.screen .ring .prog{stroke:var(--tomato);transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset 1s linear}
+.screen .t{
+  position:absolute;font-family:"JetBrains Mono";font-weight:600;
+  font-size:1.7rem;color:var(--cream);letter-spacing:.02em;
+}
+.screen .ph{
+  position:absolute;margin-top:74px;
+  font-family:"JetBrains Mono";font-size:.65rem;letter-spacing:.2em;color:var(--tomato);
+}
+.device-caption{text-align:center;color:var(--muted);font-size:.85rem;margin-top:18px}
+
+/* ---------- Sections ---------- */
+section{padding:64px 0;border-top:1px solid var(--line)}
+.sec-eyebrow{font-family:"JetBrains Mono";font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin-bottom:10px}
+section h2{font-size:1.8rem;font-weight:800;margin-bottom:14px}
+section p.intro{color:var(--muted);max-width:62ch;margin-bottom:32px}
+
+/* ---------- Installer ---------- */
+.flasher{
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:36px;display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;
+}
+.flasher h3{font-size:1.25rem;margin-bottom:10px}
+.flasher ol{color:var(--muted);padding-left:20px;font-size:.95rem}
+.flasher ol li{margin:6px 0}
+.flasher ol li strong{color:var(--cream)}
+esp-web-install-button button.flash-btn{
+  background:var(--tomato);color:#fff;border:0;border-radius:12px;
+  padding:18px 34px;font-size:1.1rem;font-weight:700;cursor:pointer;
+  font-family:"Bricolage Grotesque";box-shadow:0 10px 30px rgba(232,80,58,.35);
+}
+esp-web-install-button button.flash-btn:hover{filter:brightness(1.1)}
+.unsupported{color:var(--tomato);font-size:.9rem;max-width:24ch}
+
+/* ---------- Grilles ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px}
+.card h3{font-size:1.05rem;margin-bottom:10px;color:var(--pcb)}
+.card p,.card ul{color:var(--muted);font-size:.93rem}
+.card ul{padding-left:18px}
+.card ul li{margin:5px 0}
+.badge{display:inline-block;font-family:"JetBrains Mono";font-size:.7rem;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:var(--teal);margin-bottom:12px}
+
+/* ---------- STA ---------- */
+.sta{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+
+/* ---------- FAQ ---------- */
+details{border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:10px}
+summary{cursor:pointer;padding:16px 20px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::after{content:"+";font-family:"JetBrains Mono";color:var(--pcb);font-size:1.2rem}
+details[open] summary::after{content:"–"}
+details .body{padding:0 20px 18px;color:var(--muted);font-size:.93rem}
+details .body code{font-family:"JetBrains Mono";background:var(--panel-2);border-radius:5px;padding:2px 6px;font-size:.85em;color:var(--pcb)}
+
+footer{border-top:1px solid var(--line);padding:36px 0;color:var(--muted);font-size:.85rem}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+
+@media (max-width:820px){
+  .hero{grid-template-columns:1fr;padding-top:48px}
+  .device{--pcbw:300px;transform:none;margin-top:8px}
+  .flasher{grid-template-columns:1fr}
+  nav ul{display:none}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#"><span class="chip" aria-hidden="true"></span>Pomodoro CYD</a>
+    <ul>
+      <li><a href="#installer">Installer</a></li>
+      <li><a href="#materiel">Matériel</a></li>
+      <li><a href="#fonctions">Fonctionnalités</a></li>
+      <li><a href="#config">Config web</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <div>
+    <p class="eyebrow">Firmware libre · ESP32 · écran tactile 2.8"</p>
+    <h1>Un minuteur <em>Pomodoro</em> sur votre bureau, flashé en un clic.</h1>
+    <p class="lead">Pomodoro CYD transforme un écran ESP32 « Cheap Yellow Display » à ~8&nbsp;€
+    en minuteur de concentration tactile&nbsp;: durées réglables du bout du doigt,
+    horloge NTP, configuration Wi-Fi depuis le navigateur et portail web local.
+    Aucun IDE, aucun câblage&nbsp;— juste un câble USB.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#installer">Flasher mon CYD</a>
+      <a class="btn btn-ghost" href="#fonctions">Voir les fonctionnalités</a>
+    </div>
+  </div>
+
+  <div>
+    <div class="device" aria-label="Illustration du minuteur Pomodoro sur écran CYD">
+      <span class="hole tl"></span><span class="hole tr"></span>
+      <span class="hole bl"></span><span class="hole br"></span>
+      <div class="screen">
+        <svg class="ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="44"></circle>
+          <circle class="prog" id="demo-ring" cx="50" cy="50" r="44"
+                  stroke-dasharray="276.46" stroke-dashoffset="0"></circle>
+        </svg>
+        <span class="t" id="demo-time">25:00</span>
+        <span class="ph">FOCUS</span>
+      </div>
+      <div class="silk"><span>ESP32-2432S028R</span><span>240×320 · ILI9341</span></div>
+    </div>
+    <p class="device-caption">Démo en direct — c'est exactement l'interface du firmware.</p>
+  </div>
+</header>
+
+<section id="installer">
+  <div class="wrap">
+    <p class="sec-eyebrow">Web flasher</p>
+    <h2>Installez le firmware depuis votre navigateur</h2>
+    <p class="intro">Le flash utilise Web Serial (ESP Web Tools)&nbsp;: pas de drivers exotiques,
+    pas de ligne de commande. Une fois flashé, l'assistant vous propose directement
+    de connecter le Pomodoro à votre Wi-Fi.</p>
+    <div class="flasher">
+      <div>
+        <h3>Avant de cliquer</h3>
+        <ol>
+          <li>Utilisez <strong>Chrome ou Edge</strong> (Firefox et Safari ne gèrent pas Web Serial).</li>
+          <li>Branchez le CYD en USB avec un <strong>câble data</strong> (pas un câble de charge seule).</li>
+          <li>Cliquez, choisissez le port série, puis <strong>Install</strong>.</li>
+          <li>À la fin, renseignez votre <strong>Wi-Fi</strong> dans la fenêtre — le lien vers le portail de configuration s'affiche.</li>
+        </ol>
+      </div>
+      <esp-web-install-button manifest="./manifest.json">
+        <button class="flash-btn" slot="activate">⚡ Flasher Pomodoro CYD</button>
+        <span class="unsupported" slot="unsupported">Navigateur non compatible — ouvrez cette page dans Chrome ou Edge.</span>
+        <span class="unsupported" slot="not-allowed">Le flash nécessite une page servie en HTTPS.</span>
+      </esp-web-install-button>
+    </div>
+  </div>
+</section>
+
+<section id="materiel">
+  <div class="wrap">
+    <p class="sec-eyebrow">Matériel</p>
+    <h2>Un seul composant</h2>
+    <p class="intro">Le projet tourne sur le fameux « CYD »&nbsp;: un ESP32 avec écran
+    tactile résistif 2.8 pouces intégré, trouvable pour moins de 10&nbsp;€.</p>
+    <div class="grid">
+      <div class="card">
+        <span class="badge">requis</span>
+        <h3>ESP32-2432S028R — « Cheap Yellow Display »</h3>
+        <ul>
+          <li>Écran 2.8" ILI9341 240×320, tactile XPT2046</li>
+          <li>ESP32 Wi-Fi + Bluetooth, LED RGB embarquée</li>
+          <li>Alimentation par simple câble micro-USB</li>
+          <li>Variantes v2 (double USB) et v3 supportées</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="badge">optionnel</span>
+        <h3>Boîtier imprimé en 3D</h3>
+        <p>De nombreux boîtiers pour CYD existent sur Printables et MakerWorld
+        (recherchez «&nbsp;ESP32-2432S028R case&nbsp;»). Un support incliné à 30–45°
+        est idéal pour un minuteur de bureau.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="fonctions">
+  <div class="wrap">
+    <p class="sec-eyebrow">Firmware</p>
+    <h2>Fonctionnalités</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Minuteur tactile complet</h3>
+        <ul>
+          <li>Cycle focus / pause courte / pause longue</li>
+          <li>Durées réglables à l'écran (boutons + / –)</li>
+          <li>Points de progression du cycle, compteur de sessions</li>
+          <li>Démarrer, pause, reset, passer — au doigt</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Connecté, sans cloud</h3>
+        <ul>
+          <li>Configuration Wi-Fi depuis le navigateur (Improv Serial)</li>
+          <li>Horloge locale synchronisée par NTP</li>
+          <li>Accessible via <span class="mono">pomodoro.local</span></li>
+          <li>Tout reste sur votre réseau — zéro service externe</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Signal de fin de phase</h3>
+        <ul>
+          <li>Flash de la LED RGB embarquée en fin de session</li>
+          <li>Couleur de l'anneau selon la phase en cours</li>
+          <li>Enchaînement automatique des phases (optionnel)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Pour les bidouilleurs</h3>
+        <ul>
+          <li>Endpoint <span class="mono">/api/state</span> en JSON — parfait pour Home&nbsp;Assistant</li>
+          <li>Réglages persistants en mémoire NVS</li>
+          <li>Code source PlatformIO + LVGL 9, licence libre</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <div class="wrap">
+    <p class="sec-eyebrow">Portail web</p>
+    <h2>Configurez tout depuis le navigateur</h2>
+    <p class="intro">Une fois connecté au Wi-Fi, le Pomodoro expose une page locale
+    de configuration — sans reflasher, sans application à installer.</p>
+    <div class="sta">
+      <div class="card">
+        <h3>Minuteur</h3>
+        <p>Durées focus, pause courte, pause longue, nombre de sessions par cycle
+        et enchaînement automatique. Les changements s'appliquent immédiatement à l'écran.</p>
+      </div>
+      <div class="card">
+        <h3>Écran &amp; LED</h3>
+        <p>Luminosité du rétroéclairage, activation du flash LED de fin de phase
+        et fuseau horaire pour l'horloge NTP.</p>
+      </div>
+      <div class="card">
+        <h3>Wi-Fi</h3>
+        <p>Changez de réseau à tout moment depuis le portail, ou reprovisionnez
+        par USB via le flasher de cette page.</p>
+      </div>
+      <div class="card">
+        <h3>API d'état</h3>
+        <p><span class="mono">GET /api/state</span> renvoie phase, état, temps restant
+        et sessions terminées — intégrable en capteur RESTful dans Home&nbsp;Assistant.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="sec-eyebrow">Dépannage</p>
+    <h2>Questions fréquentes</h2>
+    <details>
+      <summary>Le bouton de flash ne détecte aucun port série</summary>
+      <div class="body">Vérifiez que vous utilisez Chrome ou Edge, et surtout que votre câble
+      USB transporte les données (beaucoup de câbles fournis avec des gadgets sont
+      « charge seule »). Sous Linux, ajoutez votre utilisateur au groupe
+      <code>dialout</code>. Le CYD utilise une puce CH340&nbsp;: sous Windows, le pilote
+      s'installe normalement tout seul.</div>
+    </details>
+    <details>
+      <summary>Le flash échoue à « Connecting… »</summary>
+      <div class="body">Maintenez le bouton <code>BOOT</code> du CYD enfoncé au moment où
+      le flash démarre, puis relâchez. Fermez aussi tout moniteur série ouvert
+      (Arduino IDE, PlatformIO) qui occuperait le port.</div>
+    </details>
+    <details>
+      <summary>La connexion Wi-Fi échoue après avoir saisi le mot de passe</summary>
+      <div class="body">L'ESP32 ne supporte que le Wi-Fi <strong>2,4&nbsp;GHz</strong>. Vérifiez que
+      votre réseau n'est pas en 5&nbsp;GHz uniquement, que le mot de passe est correct
+      et que le signal est suffisant. Les portails captifs et l'isolation client
+      des réseaux invités posent aussi problème.</div>
+    </details>
+    <details>
+      <summary>pomodoro.local ne répond pas</summary>
+      <div class="body">Le mDNS est parfois bloqué par les routeurs ou l'isolation
+      des VLAN. Utilisez directement l'adresse IP affichée en haut à gauche de
+      l'écran du CYD.</div>
+    </details>
+    <details>
+      <summary>L'écran reste noir ou les couleurs sont inversées</summary>
+      <div class="body">Il existe plusieurs révisions du CYD. Si vous avez le modèle à
+      double port USB (micro-USB + USB-C), flashez la variante <code>v2</code> du
+      firmware (disponible dans les releases GitHub du projet), qui corrige
+      l'inversion des couleurs et le rétroéclairage.</div>
+    </details>
+    <details>
+      <summary>L'heure affichée est incorrecte</summary>
+      <div class="body">L'horloge se synchronise par NTP à la connexion Wi-Fi. Le fuseau
+      par défaut est <code>Europe/Bruxelles</code>&nbsp;; il se change dans le portail web
+      (champ « Fuseau horaire », format POSIX TZ).</div>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Pomodoro CYD — firmware et site open source.</span>
+    <span>Construit avec <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>,
+    <a href="https://lvgl.io/">LVGL</a> et <a href="https://www.improv-wifi.com/">Improv Wi-Fi</a>.</span>
+  </div>
+</footer>
+
+<script>
+// Démo animée du hero : compte à rebours 25:00 en accéléré (1 min = 1 s réelle ÷ 12)
+(function(){
+  const CIRC = 276.46;
+  const total = 25*60;
+  let remaining = total;
+  const t = document.getElementById('demo-time');
+  const ring = document.getElementById('demo-ring');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) return; // Reste figé à 25:00
+  setInterval(()=>{
+    remaining -= 5;               // accéléré pour la démo
+    if (remaining <= 0) remaining = total;
+    const m = String(Math.floor(remaining/60)).padStart(2,'0');
+    const s = String(remaining%60).padStart(2,'0');
+    t.textContent = m + ':' + s;
+    ring.style.strokeDashoffset = (CIRC * (1 - remaining/total)).toFixed(2);
+  }, 1000);
+})();
+</script>
+</body>
+</html>

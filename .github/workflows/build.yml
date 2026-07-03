@@ -1,0 +1,81 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO + esptool
+        run: pip install platformio esptool
+
+      - name: Build firmware (CYD standard)
+        run: pio run -e esp32-2432S028R
+
+      - name: Merge single-file binary for ESP Web Tools
+        run: |
+          BUILD=.pio/build/esp32-2432S028R
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)
+          mkdir -p web/firmware
+          python -m esptool --chip esp32 merge_bin \
+            -o web/firmware/pomodoro-cyd.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  $BUILD/bootloader.bin \
+            0x8000  $BUILD/partitions.bin \
+            0xe000  "$BOOT_APP0" \
+            0x10000 $BUILD/firmware.bin
+
+      # Variante v2 (double USB) publiée à côté, sélectionnable via manifest dédié si besoin
+      - name: Build firmware (CYD v2)
+        run: |
+          pio run -e esp32-2432S028Rv2
+          BUILD=.pio/build/esp32-2432S028Rv2
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)
+          python -m esptool --chip esp32 merge_bin \
+            -o web/firmware/pomodoro-cyd-v2.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  $BUILD/bootloader.bin \
+            0x8000  $BUILD/partitions.bin \
+            0xe000  "$BOOT_APP0" \
+            0x10000 $BUILD/firmware.bin
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
