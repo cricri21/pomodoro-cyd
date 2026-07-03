@@ -225,9 +225,9 @@ static void buildSettings() {
   buildRow(scrSettings, 126, "Pause longue", &rows[2]);
   buildRow(scrSettings, 172, "Sessions / cycle", &rows[3]);
 
-  lv_obj_t *back = makeButton(scrSettings, LV_SYMBOL_OK "  Valider", COL_SHORT, onCloseSettings, 296, 22);
+  lv_obj_t *back = makeButton(scrSettings, LV_SYMBOL_OK "  Valider", COL_SHORT, onCloseSettings, 296, 42);
   lv_obj_set_style_bg_color(back, COL_SHORT, 0);
-  lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -4);
+  lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
 // ------------------------------------------------------------------
