@@ -15,6 +15,7 @@ void settings_load() {
   g_settings.ledEnabled = prefs.getBool("led", true);
   String tz = prefs.getString("tz", "CET-1CEST,M3.5.0,M10.5.0/3");
   strlcpy(g_settings.tz, tz.c_str(), sizeof(g_settings.tz));
+  g_settings.activePreset = prefs.getUChar("preset", 0);
   prefs.end();
 
   // Garde-fous
@@ -35,5 +36,6 @@ void settings_save() {
   prefs.putUChar("bright", g_settings.brightness);
   prefs.putBool("led", g_settings.ledEnabled);
   prefs.putString("tz", g_settings.tz);
+  prefs.putUChar("preset", g_settings.activePreset);
   prefs.end();
 }
