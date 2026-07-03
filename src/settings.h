@@ -10,6 +10,7 @@ struct PomodoroSettings {
   uint8_t brightness = 100;      // Rétroéclairage en %
   bool ledEnabled = true;        // Flash LED RGB en fin de phase
   char tz[64] = "CET-1CEST,M3.5.0,M10.5.0/3"; // Europe/Bruxelles
+  uint8_t activePreset = 0;      // Index du dernier preset (type de session) choisi
 };
 
 extern PomodoroSettings g_settings;
