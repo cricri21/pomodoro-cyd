@@ -21,10 +21,13 @@
 // Objets
 // ------------------------------------------------------------------
 static lv_obj_t *scrMain, *scrSettings, *scrPresets;
-static lv_obj_t *arc, *lblTime, *lblPhase, *lblClock, *lblWifi;
+static lv_obj_t *arc, *lblTime, *lblPhase, *phaseIconBox, *lblClock, *lblWifi;
 static lv_obj_t *btnStart, *lblStart;
 static lv_obj_t *dots[8];
-static lv_obj_t *presetChip, *presetChipIcon, *presetChipLabel;
+
+// Suivi pour ne redessiner l'icône de phase que si nécessaire
+static bool lastIconShown = false;
+static int8_t lastIconPreset = -1;
 
 // Écran réglages
 struct SettingRow {
@@ -83,8 +86,9 @@ static void onRowPlus(lv_event_t *e)  { adjustRow((SettingRow *)lv_event_get_use
 static void onPickPreset(lv_event_t *e) {
   uint8_t idx = (uint8_t)(intptr_t)lv_event_get_user_data(e);
   preset_apply(idx);
+  lastIconPreset = -1; // force le redessin de l'icône dans le cercle
   lv_screen_load(scrMain);
-  ui_update(); // rafraîchit aussi le chip (voir ui_update)
+  ui_update();
 }
 
 // ------------------------------------------------------------------
@@ -141,13 +145,23 @@ static void buildMain() {
   lv_obj_set_style_text_font(lblTime, &lv_font_montserrat_48, 0);
   lv_obj_set_style_text_color(lblTime, COL_TEXT, 0);
   lv_label_set_text(lblTime, "25:00");
-  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -8);
+  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -12);
 
+  // Texte de phase (pause courte / pause longue)
   lblPhase = lv_label_create(scrMain);
   lv_obj_set_style_text_font(lblPhase, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lblPhase, COL_FOCUS, 0);
   lv_label_set_text(lblPhase, "FOCUS");
-  lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 28);
+  lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 30);
+
+  // Icône du type de session (remplace le texte "FOCUS" pendant la phase focus)
+  phaseIconBox = lv_obj_create(scrMain);
+  lv_obj_remove_flag(phaseIconBox, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_border_width(phaseIconBox, 0, 0);
+  lv_obj_set_style_bg_opa(phaseIconBox, LV_OPA_TRANSP, 0);
+  lv_obj_set_size(phaseIconBox, 34, 34);
+  lv_obj_align_to(phaseIconBox, arc, LV_ALIGN_CENTER, 0, 30);
+  lv_obj_add_flag(phaseIconBox, LV_OBJ_FLAG_HIDDEN);
 
   // --- Points de session ---
   for (int i = 0; i < 8; i++) {
@@ -159,32 +173,6 @@ static void buildMain() {
     lv_obj_remove_flag(dots[i], LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
   }
-
-  // --- Chip "type de session" sous l'arc (tap -> écran de sélection) ---
-  presetChip = lv_button_create(scrMain);
-  lv_obj_set_size(presetChip, 188, 34);
-  lv_obj_align(presetChip, LV_ALIGN_BOTTOM_LEFT, 12, -6);
-  lv_obj_set_style_bg_color(presetChip, COL_CARD, 0);
-  lv_obj_set_style_radius(presetChip, 10, 0);
-  lv_obj_set_style_shadow_width(presetChip, 0, 0);
-  lv_obj_add_event_cb(presetChip, onOpenPresets, LV_EVENT_CLICKED, nullptr);
-
-  presetChipIcon = lv_obj_create(presetChip);
-  lv_obj_remove_flag(presetChipIcon, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_border_width(presetChipIcon, 0, 0);
-  lv_obj_set_style_bg_opa(presetChipIcon, LV_OPA_TRANSP, 0);
-  lv_obj_set_size(presetChipIcon, 24, 24);
-  lv_obj_align(presetChipIcon, LV_ALIGN_LEFT_MID, 4, 0);
-
-  presetChipLabel = lv_label_create(presetChip);
-  lv_obj_set_style_text_color(presetChipLabel, COL_TEXT, 0);
-  lv_obj_set_style_text_font(presetChipLabel, &lv_font_montserrat_14, 0);
-  lv_obj_align(presetChipLabel, LV_ALIGN_LEFT_MID, 36, 0);
-
-  lv_obj_t *chevron = lv_label_create(presetChip);
-  lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
-  lv_obj_set_style_text_color(chevron, COL_MUTED, 0);
-  lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -8, 0);
 
   // --- Boutons colonne droite ---
   btnStart = makeButton(scrMain, LV_SYMBOL_PLAY "  Demarrer", COL_FOCUS, onStartPause, 112, 44);
@@ -199,6 +187,9 @@ static void buildMain() {
 
   lv_obj_t *bRegler = makeButton(scrMain, LV_SYMBOL_SETTINGS "  Regler", COL_CARD, onOpenSettings, 112, 34);
   lv_obj_align(bRegler, LV_ALIGN_TOP_RIGHT, -10, 152);
+
+  lv_obj_t *bType = makeButton(scrMain, LV_SYMBOL_LIST "  Type", COL_CARD, onOpenPresets, 112, 34);
+  lv_obj_align(bType, LV_ALIGN_TOP_RIGHT, -10, 192);
 }
 
 // ------------------------------------------------------------------
@@ -332,19 +323,11 @@ static void buildPresets() {
 // ------------------------------------------------------------------
 // API publique
 // ------------------------------------------------------------------
-static void refreshPresetChip() {
-  uint8_t idx = g_settings.activePreset < PRESET_COUNT ? g_settings.activePreset : 0;
-  lv_obj_clean(presetChipIcon);
-  preset_draw_icon(presetChipIcon, PRESETS[idx].icon, PRESETS[idx].color, 22);
-  lv_label_set_text(presetChipLabel, PRESETS[idx].name);
-}
-
 void ui_init() {
   buildMain();
   buildSettings();
   buildPresets();
   lv_screen_load(scrMain);
-  refreshPresetChip();
   ui_update();
 }
 
@@ -358,7 +341,7 @@ void ui_update() {
   // Temps restant
   uint32_t s = (g_pomodoro.remainingMs() + 999) / 1000;
   lv_label_set_text_fmt(lblTime, "%02u:%02u", (unsigned)(s / 60), (unsigned)(s % 60));
-  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -8);
+  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -12);
 
   // Arc
   uint32_t total = g_pomodoro.totalMs();
@@ -367,10 +350,26 @@ void ui_update() {
   lv_color_t pc = phaseColor(g_pomodoro.phase());
   lv_obj_set_style_arc_color(arc, pc, LV_PART_INDICATOR);
 
-  // Phase
-  lv_label_set_text(lblPhase, phaseName(g_pomodoro.phase()));
-  lv_obj_set_style_text_color(lblPhase, pc, 0);
-  lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 28);
+  // Phase : icône du type de session pendant le focus, texte pendant les pauses
+  bool isFocus = (g_pomodoro.phase() == PomoPhase::FOCUS);
+  if (isFocus) {
+    uint8_t idx = g_settings.activePreset < PRESET_COUNT ? g_settings.activePreset : 0;
+    if (!lastIconShown || lastIconPreset != (int8_t)idx) {
+      lv_obj_clean(phaseIconBox);
+      preset_draw_icon(phaseIconBox, PRESETS[idx].icon, PRESETS[idx].color, 30);
+      lastIconPreset = (int8_t)idx;
+    }
+    lv_obj_remove_flag(phaseIconBox, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(lblPhase, LV_OBJ_FLAG_HIDDEN);
+    lastIconShown = true;
+  } else {
+    lv_obj_add_flag(phaseIconBox, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(lblPhase, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lblPhase, phaseName(g_pomodoro.phase()));
+    lv_obj_set_style_text_color(lblPhase, pc, 0);
+    lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 30);
+    lastIconShown = false;
+  }
 
   // Bouton principal
   if (g_pomodoro.state() == PomoState::RUNNING)
@@ -396,9 +395,6 @@ void ui_update() {
       lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
     }
   }
-
-  // Chip du type de session actif
-  refreshPresetChip();
 
   // Horloge (NTP)
   time_t now = time(nullptr);
