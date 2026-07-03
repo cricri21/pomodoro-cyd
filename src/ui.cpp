@@ -5,6 +5,7 @@
 #include <lvgl.h>
 #include <WiFi.h>
 #include <time.h>
+#include <math.h>
 
 // ------------------------------------------------------------------
 // Palette
@@ -18,25 +19,51 @@
 #define COL_LONG    lv_color_hex(0xF2C14E)  // jaune CYD
 
 // ------------------------------------------------------------------
+// Dial en traits (remplace l'arc circulaire) — carré arrondi façon
+// cadran de radio vintage, calculé via une formule de "squircle"
+// ------------------------------------------------------------------
+#define TICK_COUNT 40
+static lv_obj_t *dialBox;                       // conteneur transparent 176x176
+static lv_obj_t *tickLines[TICK_COUNT];         // un lv_line par trait
+static lv_point_precise_t tickPts[TICK_COUNT][2];
+
+static void computeTickPoints() {
+  const float cx = 88.0f, cy = 88.0f;   // centre du dial (176x176)
+  const float rOut = 84.0f, rIn = 68.0f; // rayons ext./int. des traits
+  const float shape = 0.42f;             // 0.5=carré doux, plus petit = plus carré
+  for (int i = 0; i < TICK_COUNT; i++) {
+    float theta = (float)i * (2.0f * (float)M_PI / TICK_COUNT) - (float)M_PI / 2.0f;
+    float ct = cosf(theta), st = sinf(theta);
+    float ux = copysignf(powf(fabsf(ct), shape), ct);
+    float uy = copysignf(powf(fabsf(st), shape), st);
+    float mag = sqrtf(ux * ux + uy * uy);
+    if (mag < 0.0001f) mag = 0.0001f;
+    ux /= mag; uy /= mag;
+    tickPts[i][0].x = (lv_value_precise_t)(cx + ux * rIn);
+    tickPts[i][0].y = (lv_value_precise_t)(cy + uy * rIn);
+    tickPts[i][1].x = (lv_value_precise_t)(cx + ux * rOut);
+    tickPts[i][1].y = (lv_value_precise_t)(cy + uy * rOut);
+  }
+}
+
+// ------------------------------------------------------------------
 // Objets
 // ------------------------------------------------------------------
 static lv_obj_t *scrMain, *scrSettings, *scrPresets;
-static lv_obj_t *arc, *lblTime, *lblPhase, *phaseIconBox, *lblClock, *lblWifi;
+static lv_obj_t *lblTime, *lblPhase, *phaseIconBox, *lblClock, *lblWifi;
 static lv_obj_t *btnStart, *lblStart;
 static lv_obj_t *dots[8];
 
-// Suivi pour ne redessiner l'icône de phase que si nécessaire
 static bool lastIconShown = false;
 static int8_t lastIconPreset = -1;
 
-// Écran réglages
 struct SettingRow {
   lv_obj_t *lblValue;
   uint16_t *value;
   uint16_t minV, maxV, step;
 };
 static SettingRow rows[4];
-static uint16_t sessionsTmp; // sessionsUntilLong est uint8_t → copie de travail
+static uint16_t sessionsTmp;
 
 static lv_color_t phaseColor(PomoPhase p) {
   switch (p) {
@@ -86,7 +113,7 @@ static void onRowPlus(lv_event_t *e)  { adjustRow((SettingRow *)lv_event_get_use
 static void onPickPreset(lv_event_t *e) {
   uint8_t idx = (uint8_t)(intptr_t)lv_event_get_user_data(e);
   preset_apply(idx);
-  lastIconPreset = -1; // force le redessin de l'icône dans le cercle
+  lastIconPreset = -1;
   lv_screen_load(scrMain);
   ui_update();
 }
@@ -126,41 +153,42 @@ static void buildMain() {
   lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -10, 4);
   lv_label_set_text(lblClock, "--:--");
 
-  // --- Arc de progression ---
-  arc = lv_arc_create(scrMain);
-  lv_obj_set_size(arc, 176, 176);
-  lv_obj_align(arc, LV_ALIGN_LEFT_MID, 12, 6);
-  lv_arc_set_rotation(arc, 270);
-  lv_arc_set_bg_angles(arc, 0, 360);
-  lv_arc_set_range(arc, 0, 1000);
-  lv_arc_set_value(arc, 1000);
-  lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
-  lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_arc_width(arc, 10, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, 10, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(arc, COL_CARD, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(arc, COL_FOCUS, LV_PART_INDICATOR);
+  // --- Dial en traits (façon cadran de radio) ---
+  dialBox = lv_obj_create(scrMain);
+  lv_obj_remove_flag(dialBox, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_border_width(dialBox, 0, 0);
+  lv_obj_set_style_bg_opa(dialBox, LV_OPA_TRANSP, 0);
+  lv_obj_set_size(dialBox, 176, 176);
+  lv_obj_align(dialBox, LV_ALIGN_LEFT_MID, 12, 6);
+
+  computeTickPoints();
+  for (int i = 0; i < TICK_COUNT; i++) {
+    lv_obj_t *ln = lv_line_create(dialBox);
+    lv_line_set_points(ln, tickPts[i], 2);
+    lv_obj_set_style_line_width(ln, 3, 0);
+    lv_obj_set_style_line_rounded(ln, true, 0);
+    lv_obj_set_style_line_color(ln, COL_CARD, 0);
+    tickLines[i] = ln;
+  }
 
   lblTime = lv_label_create(scrMain);
   lv_obj_set_style_text_font(lblTime, &lv_font_montserrat_48, 0);
   lv_obj_set_style_text_color(lblTime, COL_TEXT, 0);
   lv_label_set_text(lblTime, "25:00");
-  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -12);
+  lv_obj_align_to(lblTime, dialBox, LV_ALIGN_CENTER, 0, -12);
 
-  // Texte de phase (pause courte / pause longue)
   lblPhase = lv_label_create(scrMain);
   lv_obj_set_style_text_font(lblPhase, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lblPhase, COL_FOCUS, 0);
   lv_label_set_text(lblPhase, "FOCUS");
-  lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 30);
+  lv_obj_align_to(lblPhase, dialBox, LV_ALIGN_CENTER, 0, 30);
 
-  // Icône du type de session (remplace le texte "FOCUS" pendant la phase focus)
   phaseIconBox = lv_obj_create(scrMain);
   lv_obj_remove_flag(phaseIconBox, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_border_width(phaseIconBox, 0, 0);
   lv_obj_set_style_bg_opa(phaseIconBox, LV_OPA_TRANSP, 0);
   lv_obj_set_size(phaseIconBox, 34, 34);
-  lv_obj_align_to(phaseIconBox, arc, LV_ALIGN_CENTER, 0, 30);
+  lv_obj_align_to(phaseIconBox, dialBox, LV_ALIGN_CENTER, 0, 30);
   lv_obj_add_flag(phaseIconBox, LV_OBJ_FLAG_HIDDEN);
 
   // --- Points de session ---
@@ -341,14 +369,19 @@ void ui_update() {
   // Temps restant
   uint32_t s = (g_pomodoro.remainingMs() + 999) / 1000;
   lv_label_set_text_fmt(lblTime, "%02u:%02u", (unsigned)(s / 60), (unsigned)(s % 60));
-  lv_obj_align_to(lblTime, arc, LV_ALIGN_CENTER, 0, -12);
+  lv_obj_align_to(lblTime, dialBox, LV_ALIGN_CENTER, 0, -12);
 
-  // Arc
-  uint32_t total = g_pomodoro.totalMs();
-  int32_t v = total ? (int32_t)((uint64_t)g_pomodoro.remainingMs() * 1000 / total) : 0;
-  lv_arc_set_value(arc, v);
   lv_color_t pc = phaseColor(g_pomodoro.phase());
-  lv_obj_set_style_arc_color(arc, pc, LV_PART_INDICATOR);
+
+  // Dial : traits allumés (temps restant) vs traits éteints (temps écoulé)
+  uint32_t total = g_pomodoro.totalMs();
+  float frac = total ? (float)g_pomodoro.remainingMs() / (float)total : 1.0f;
+  int lit = (int)(frac * TICK_COUNT + 0.5f);
+  if (lit < 0) lit = 0;
+  if (lit > TICK_COUNT) lit = TICK_COUNT;
+  for (int i = 0; i < TICK_COUNT; i++) {
+    lv_obj_set_style_line_color(tickLines[i], (i < lit) ? pc : COL_CARD, 0);
+  }
 
   // Phase : icône du type de session pendant le focus, texte pendant les pauses
   bool isFocus = (g_pomodoro.phase() == PomoPhase::FOCUS);
@@ -367,7 +400,7 @@ void ui_update() {
     lv_obj_remove_flag(lblPhase, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(lblPhase, phaseName(g_pomodoro.phase()));
     lv_obj_set_style_text_color(lblPhase, pc, 0);
-    lv_obj_align_to(lblPhase, arc, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_align_to(lblPhase, dialBox, LV_ALIGN_CENTER, 0, 30);
     lastIconShown = false;
   }
 
